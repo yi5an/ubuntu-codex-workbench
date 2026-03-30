@@ -34,9 +34,10 @@ class TerminalService {
     }
 
     const proxyEnv = this.buildProxyEnv();
+    const codexCommand = this.getCodexCommand();
     const launchCodex = options.launchCodex !== false && this.hasCodexCommand();
     const shell = process.env.SHELL || "/usr/bin/zsh";
-    const executable = launchCodex ? "codex" : shell;
+    const executable = launchCodex ? codexCommand : shell;
     const args = launchCodex ? [] : ["-l"];
     const mode = launchCodex ? "codex" : "shell";
 
@@ -272,10 +273,23 @@ class TerminalService {
   }
 
   hasCodexCommand() {
+    const configuredPath = String(this.getSettings()?.codex?.path || "").trim();
+    if (configuredPath) {
+      const result = spawnSync(configuredPath, ["--version"], {
+        stdio: "ignore",
+        timeout: 5000,
+      });
+      return result.status === 0;
+    }
+
     const result = spawnSync("bash", ["-lc", "command -v codex >/dev/null 2>&1"], {
       stdio: "ignore",
     });
     return result.status === 0;
+  }
+
+  getCodexCommand() {
+    return String(this.getSettings()?.codex?.path || "").trim() || "codex";
   }
 
   scheduleCompletionCheck(session) {

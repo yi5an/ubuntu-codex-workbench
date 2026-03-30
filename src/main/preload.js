@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("workbenchApi", {
   toggleFavorite: (projectId) => ipcRenderer.invoke("project:favorite", projectId),
   openProject: (projectId) => ipcRenderer.invoke("project:open", projectId),
   updateSettings: (patch) => ipcRenderer.invoke("settings:update", patch),
+  applySettingsAndRestart: (patch) => ipcRenderer.invoke("settings:apply-and-restart", patch),
   runTask: (payload) => ipcRenderer.invoke("task:run", payload),
   stopTask: () => ipcRenderer.invoke("task:stop"),
   createTerminal: (payload) => ipcRenderer.invoke("terminal:create", payload),

@@ -1,8 +1,8 @@
 const { spawn } = require("node:child_process");
 
 class CodexRunner {
-  run({ cwd, prompt, onStdout, onStderr, onClose, onError }) {
-    const child = spawn("codex", ["exec", "--color", "never", "--skip-git-repo-check", "-C", cwd, prompt], {
+  run({ command = "codex", cwd, prompt, onStdout, onStderr, onClose, onError }) {
+    const child = spawn(command, ["exec", "--color", "never", "--skip-git-repo-check", "-C", cwd, prompt], {
       cwd: process.cwd(),
       env: process.env,
     });

@@ -13,6 +13,7 @@
         <div class="sidebar-header">
           <p class="eyebrow">Projects</p>
           <div class="sidebar-header-actions">
+            <button id="settings-btn" class="icon-button" title="设置">设置</button>
             <button id="add-project-btn" class="primary-button compact-button">添加项目</button>
           </div>
         </div>
@@ -36,8 +37,36 @@
         </section>
       </main>
     </div>
-    <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
-
+    <div id="settings-modal" class="modal-backdrop hidden">
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Settings</p>
+            <h3 id="settings-title">应用设置</h3>
+          </div>
+          <button id="settings-close-btn" class="icon-button" title="关闭">关闭</button>
+        </div>
+        <div class="modal-body">
+          <section class="settings-panel">
+            <div class="settings-panel-row">
+              <div>
+                <div class="settings-label">当前 Codex</div>
+                <div id="settings-codex-summary" class="settings-value">正在检查...</div>
+              </div>
+            </div>
+            <label id="settings-codex-select-wrap" class="settings-panel-row hidden">
+              <span class="settings-label">Codex 路径</span>
+              <select id="settings-codex-select" class="settings-select"></select>
+            </label>
+            <div id="settings-codex-help" class="settings-help"></div>
+          </section>
+        </div>
+        <div class="modal-footer">
+          <button id="settings-cancel-btn" class="secondary-button">取消</button>
+          <button id="settings-save-btn" class="primary-button">保存并重启</button>
+        </div>
+      </section>
+    </div>
     <script src="../../node_modules/xterm/lib/xterm.js"></script>
     <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
     <script src="./renderer.js"></script>

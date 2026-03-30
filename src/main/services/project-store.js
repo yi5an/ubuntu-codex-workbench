@@ -53,6 +53,7 @@ class ProjectStore {
   getSettings() {
     return {
       ...this.data.settings,
+      codex: { ...this.data.settings.codex },
       proxy: { ...this.data.settings.proxy },
     };
   }
@@ -61,6 +62,10 @@ class ProjectStore {
     const nextSettings = {
       ...this.data.settings,
       ...patch,
+      codex: {
+        ...this.data.settings.codex,
+        ...(patch.codex || {}),
+      },
       proxy: {
         ...this.data.settings.proxy,
         ...(patch.proxy || {}),
@@ -158,6 +163,9 @@ class ProjectStore {
 
   defaultSettings() {
     return {
+      codex: {
+        path: "",
+      },
       proxy: {
         enabled: false,
         url: "",
@@ -170,6 +178,10 @@ class ProjectStore {
     return {
       ...defaults,
       ...(settings || {}),
+      codex: {
+        ...defaults.codex,
+        ...((settings && settings.codex) || {}),
+      },
       proxy: {
         ...defaults.proxy,
         ...((settings && settings.proxy) || {}),

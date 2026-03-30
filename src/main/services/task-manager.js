@@ -2,11 +2,12 @@ const { randomUUID } = require("node:crypto");
 const { EventEmitter } = require("node:events");
 
 class TaskManager extends EventEmitter {
-  constructor(projectStore, codexRunner, notificationService) {
+  constructor(projectStore, codexRunner, notificationService, options = {}) {
     super();
     this.projectStore = projectStore;
     this.codexRunner = codexRunner;
     this.notificationService = notificationService;
+    this.getCodexCommand = options.getCodexCommand || (() => "codex");
     this.activeTask = null;
     this.activeChild = null;
     this.finishedTaskIds = new Set();
@@ -21,13 +22,14 @@ class TaskManager extends EventEmitter {
       throw new Error("当前已有任务在运行，请先停止或等待完成");
     }
 
+    const codexCommand = this.getCodexCommand();
     const task = {
       id: randomUUID(),
       projectId: project.id,
       projectName: project.name,
       prompt,
       status: "running",
-      command: `codex exec --color never --skip-git-repo-check -C ${JSON.stringify(project.path)} ${JSON.stringify(prompt)}`,
+      command: `${JSON.stringify(codexCommand)} exec --color never --skip-git-repo-check -C ${JSON.stringify(project.path)} ${JSON.stringify(prompt)}`,
       startTime: new Date().toISOString(),
       endTime: null,
       output: "",
@@ -38,6 +40,7 @@ class TaskManager extends EventEmitter {
     this.emit("updated");
 
     this.activeChild = this.codexRunner.run({
+      command: codexCommand,
       cwd: project.path,
       prompt,
       onStdout: (chunk) => this.appendOutput(task.id, chunk),

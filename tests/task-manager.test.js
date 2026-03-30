@@ -53,3 +53,32 @@ test("TaskManager stores output and notifies only once", async () => {
   assert.equal(notifications.length, 1);
 });
 
+test("TaskManager uses configured codex command path", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "workbench-task-"));
+  const dataFile = path.join(tempDir, "data.json");
+  const projectDir = path.join(tempDir, "demo-project");
+  fs.mkdirSync(projectDir);
+
+  const store = new ProjectStore(dataFile);
+  const project = store.addProject(projectDir);
+  const calls = [];
+  const fakeRunner = {
+    run(options) {
+      calls.push(options);
+      return new FakeChild();
+    },
+  };
+
+  const manager = new TaskManager(
+    store,
+    fakeRunner,
+    { notifyTaskFinished() {} },
+    { getCodexCommand: () => "/home/demo/.nvm/bin/codex" }
+  );
+
+  await manager.runTask(project, "test path");
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, "/home/demo/.nvm/bin/codex");
+  assert.match(store.getTasks()[0].command, /\/home\/demo\/\.nvm\/bin\/codex/);
+});

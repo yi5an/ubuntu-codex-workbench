@@ -12,16 +12,24 @@ const state = {
 const refs = {
   appShell: document.querySelector(".app-shell"),
   addProjectBtn: document.querySelector("#add-project-btn"),
+  settingsBtn: document.querySelector("#settings-btn"),
+  settingsModal: document.querySelector("#settings-modal"),
+  settingsCloseBtn: document.querySelector("#settings-close-btn"),
+  settingsCancelBtn: document.querySelector("#settings-cancel-btn"),
+  settingsSaveBtn: document.querySelector("#settings-save-btn"),
+  settingsCodexSummary: document.querySelector("#settings-codex-summary"),
+  settingsCodexSelectWrap: document.querySelector("#settings-codex-select-wrap"),
+  settingsCodexSelect: document.querySelector("#settings-codex-select"),
+  settingsCodexHelp: document.querySelector("#settings-codex-help"),
   sidebarResizer: document.querySelector("#sidebar-resizer"),
   projectSearchInput: document.querySelector("#project-search-input"),
   projectList: document.querySelector("#project-list"),
   environmentBanner: document.querySelector("#environment-banner"),
   terminalHost: document.querySelector("#terminal-host"),
   terminalView: document.querySelector("#terminal-view"),
-  toastContainer: document.querySelector("#toast-container"),
 };
 
-let toastTimer = null;
+let draftCodexPath = "";
 
 const terminal = new window.Terminal({
   cursorBlink: true,
@@ -159,7 +167,13 @@ function renderEnvironment() {
 
   const missing = [];
   if (!state.environment.codex?.installed) {
-    missing.push("未检测到 codex");
+    if (state.environment.codex?.needsSelection) {
+      missing.push("检测到多个 Codex，请先选择要使用的版本");
+    } else if (state.environment.codex?.configuredPathMissing) {
+      missing.push("已配置的 Codex 路径不可用");
+    } else {
+      missing.push("未检测到 codex");
+    }
   }
   if (!state.environment.code?.installed) {
     missing.push("未检测到 code");
@@ -173,6 +187,36 @@ function renderEnvironment() {
 
   refs.environmentBanner.textContent = missing.join(" | ");
   refs.environmentBanner.className = "environment-banner warn";
+}
+
+function renderSettingsModal() {
+  const codex = state.environment?.codex;
+  if (!codex) {
+    refs.settingsCodexSummary.textContent = "正在检查...";
+    refs.settingsCodexSelectWrap.classList.add("hidden");
+    refs.settingsCodexHelp.textContent = "";
+    return;
+  }
+
+  const currentPath = codex.path || codex.configuredPath || "未选择";
+  refs.settingsCodexSummary.textContent = `${codex.version || "未就绪"} · ${currentPath}`;
+
+  if (codex.hasMultipleCandidates) {
+    refs.settingsCodexSelectWrap.classList.remove("hidden");
+    refs.settingsCodexSelect.innerHTML = [
+      '<option value="">请选择要使用的 Codex</option>',
+      ...codex.candidates.map((candidate) => (
+        `<option value="${escapeHtml(candidate.path)}">${escapeHtml(`${candidate.version || "未知版本"} · ${candidate.path}`)}</option>`
+      )),
+    ].join("");
+    refs.settingsCodexSelect.value = draftCodexPath || codex.configuredPath || "";
+    refs.settingsCodexHelp.textContent = "检测到多个 Codex 安装。保存后应用会自动重启，并使用这里选中的路径。";
+    return;
+  }
+
+  refs.settingsCodexSelectWrap.classList.add("hidden");
+  refs.settingsCodexSelect.innerHTML = "";
+  refs.settingsCodexHelp.textContent = "当前只检测到一份 Codex，应用会自动使用它。";
 }
 
 function renderProjects() {
@@ -238,27 +282,10 @@ function renderWorkspace() {
   renderTerminalBuffer();
 }
 
-function showToast({ title, body }) {
-  refs.toastContainer.innerHTML = `
-    <div class="toast">
-      <div class="toast-title">${escapeHtml(title)}</div>
-      <div class="toast-body">${escapeHtml(body)}</div>
-    </div>
-  `;
-  refs.toastContainer.classList.add("visible");
-
-  if (toastTimer) {
-    window.clearTimeout(toastTimer);
-  }
-
-  toastTimer = window.setTimeout(() => {
-    refs.toastContainer.classList.remove("visible");
-  }, 12000);
-}
-
 function render() {
   syncSelection();
   renderEnvironment();
+  renderSettingsModal();
   renderProjects();
   renderWorkspace();
 }
@@ -377,6 +404,29 @@ refs.projectSearchInput.addEventListener("input", (event) => {
   renderProjects();
 });
 
+refs.settingsBtn.addEventListener("click", () => {
+  draftCodexPath = state.environment?.codex?.configuredPath || "";
+  renderSettingsModal();
+  refs.settingsModal.classList.remove("hidden");
+});
+
+function closeSettingsModal() {
+  refs.settingsModal.classList.add("hidden");
+}
+
+refs.settingsCloseBtn.addEventListener("click", closeSettingsModal);
+refs.settingsCancelBtn.addEventListener("click", closeSettingsModal);
+refs.settingsModal.addEventListener("click", (event) => {
+  if (event.target === refs.settingsModal) {
+    closeSettingsModal();
+  }
+});
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !refs.settingsModal.classList.contains("hidden")) {
+    closeSettingsModal();
+  }
+});
+
 refs.projectList.addEventListener("click", async (event) => {
   const projectId = event.target.getAttribute("data-project-id");
   const action = event.target.getAttribute("data-action");
@@ -413,6 +463,22 @@ refs.projectList.addEventListener("click", async (event) => {
   clearProjectAlert(targetProjectId);
   render();
   await ensureProjectLoaded(targetProjectId);
+});
+
+refs.settingsCodexSelect.addEventListener("change", (event) => {
+  draftCodexPath = event.target.value;
+});
+
+refs.settingsSaveBtn.addEventListener("click", async () => {
+  try {
+    await window.workbenchApi.applySettingsAndRestart({
+      codex: {
+        path: draftCodexPath,
+      },
+    });
+  } catch (error) {
+    alert(error.message);
+  }
 });
 
 window.workbenchApi.onTerminalData((payload) => {
@@ -478,7 +544,6 @@ window.workbenchApi.onNotificationShow((payload) => {
     state.projectAlerts[payload.projectId] = true;
     renderProjects();
   }
-  showToast(payload);
 });
 
 refreshState().then(() => {

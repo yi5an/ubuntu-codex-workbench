@@ -50,3 +50,23 @@ test("ProjectStore detects workspace file in project root", () => {
     path.join(projectDir, "workspace-demo.code-workspace")
   );
 });
+
+test("ProjectStore exposes codex settings with defaults", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "workbench-store-"));
+  const dataFile = path.join(tempDir, "data.json");
+  const store = new ProjectStore(dataFile);
+
+  assert.deepEqual(store.getSettings().codex, {
+    path: "",
+  });
+
+  store.updateSettings({
+    codex: {
+      path: "/usr/local/bin/codex",
+    },
+  });
+
+  assert.deepEqual(store.getSettings().codex, {
+    path: "/usr/local/bin/codex",
+  });
+});

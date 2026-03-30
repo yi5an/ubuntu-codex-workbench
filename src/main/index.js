@@ -1,5 +1,6 @@
 const path = require("node:path");
 const fs = require("node:fs");
+const { spawn } = require("node:child_process");
 const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const { ProjectStore } = require("./services/project-store");
 const { CodexRunner } = require("./services/codex-runner");
@@ -17,6 +18,43 @@ let vscodeService;
 let environmentService;
 let terminalService;
 let codexNotifyService;
+
+function inspectEnvironment() {
+  return environmentService.inspect(projectStore.getSettings());
+}
+
+function relaunchApp() {
+  const execPath = process.execPath;
+  const args = process.argv.slice(1);
+
+  debugLog("app:relaunch", {
+    execPath,
+    args,
+  });
+
+  const child = spawn(execPath, args, {
+    detached: true,
+    stdio: "ignore",
+    env: process.env,
+  });
+
+  child.unref();
+  app.exit(0);
+}
+
+function syncCodexPathSetting() {
+  const settings = projectStore.getSettings();
+  const environment = environmentService.inspect(settings);
+  const desiredPath = environment.codex.autoSelectedPath;
+  const currentPath = String(settings?.codex?.path || "").trim();
+
+  if (desiredPath && desiredPath !== currentPath) {
+    projectStore.updateSettings({ codex: { path: desiredPath } });
+    return environmentService.inspect(projectStore.getSettings());
+  }
+
+  return environment;
+}
 
 function debugLog(message, meta = {}) {
   try {
@@ -139,7 +177,7 @@ function getState() {
     projects: projectStore.getProjects(),
     tasks: projectStore.getTasks(),
     currentTask: taskManager.getCurrentTask(),
-    environment: environmentService.inspect(),
+    environment: inspectEnvironment(),
     settings: projectStore.getSettings(),
   };
 }
@@ -199,8 +237,16 @@ function registerIpc() {
 
   ipcMain.handle("settings:update", async (_event, patch) => {
     const settings = projectStore.updateSettings(patch);
+    syncCodexPathSetting();
     broadcastState();
     return settings;
+  });
+
+  ipcMain.handle("settings:apply-and-restart", async (_event, patch) => {
+    projectStore.updateSettings(patch);
+    syncCodexPathSetting();
+    relaunchApp();
+    return true;
   });
 
   ipcMain.handle("project:open", async (_event, projectId) => {
@@ -235,7 +281,7 @@ function registerIpc() {
     debugLog("terminal:create", { sessionId, projectId, path: project.path });
     const terminal = terminalService.createSession(sessionId, project.path, project.name, {
       projectId,
-      launchCodex: environmentService.inspect().codex?.installed,
+      launchCodex: inspectEnvironment().codex?.installed,
     });
     broadcastState();
     return terminal;
@@ -267,6 +313,7 @@ app.whenReady().then(() => {
   projectStore = new ProjectStore(path.join(app.getPath("userData"), "workbench-data.json"));
   vscodeService = new VSCodeService();
   environmentService = new EnvironmentService();
+  syncCodexPathSetting();
   const notificationService = new NotificationService(focusMainWindow);
   notificationService.onNotify = (payload) => {
     sendRendererEvent("notification:show", payload);
@@ -296,7 +343,9 @@ app.whenReady().then(() => {
     },
   });
   codexNotifyService.start();
-  taskManager = new TaskManager(projectStore, new CodexRunner(), notificationService);
+  taskManager = new TaskManager(projectStore, new CodexRunner(), notificationService, {
+    getCodexCommand: () => inspectEnvironment().codex?.path || "codex",
+  });
   taskManager.on("updated", broadcastState);
 
   registerIpc();
