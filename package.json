@@ -1,0 +1,66 @@
+{
+  "name": "ubuntu-codex-workbench",
+  "version": "0.1.1",
+  "description": "Ubuntu desktop workbench for running Codex CLI across multiple projects",
+  "main": "src/main/index.js",
+  "scripts": {
+    "dev": "electron .",
+    "dev:no-sandbox": "electron . --no-sandbox",
+    "start": "electron .",
+    "test": "node --test",
+    "dist:linux": "electron-builder --linux deb"
+  },
+  "keywords": [
+    "electron",
+    "ubuntu",
+    "codex"
+  ],
+  "author": "yi5an",
+  "homepage": "https://github.com/yi5an/ubuntu-codex-workbench",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yi5an/ubuntu-codex-workbench.git"
+  },
+  "license": "MIT",
+  "build": {
+    "appId": "com.yi5an.ubuntucodexworkbench",
+    "productName": "Ubuntu Codex Workbench",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "scripts/**/*",
+      "package.json",
+      "package-lock.json",
+      "README.md",
+      "node_modules/**/*"
+    ],
+    "linux": {
+      "category": "Development",
+      "icon": "build/icons",
+      "target": [
+        "deb"
+      ],
+      "executableArgs": [
+        "--no-sandbox"
+      ],
+      "artifactName": "${name}_${version}_${arch}.${ext}"
+    },
+    "deb": {
+      "priority": "optional",
+      "maintainer": "yi5an",
+      "synopsis": "Ubuntu desktop workbench for Codex CLI",
+      "description": "Manage local projects and run Codex in a dedicated Ubuntu desktop workbench."
+    }
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "node-pty": "^1.1.0",
+    "xterm": "^5.3.0"
+  },
+  "devDependencies": {
+    "electron": "^35.1.4",
+    "electron-builder": "^26.8.1"
+  }
+}

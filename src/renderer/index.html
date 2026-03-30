@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ubuntu Codex Workbench</title>
+    <link rel="stylesheet" href="../../node_modules/xterm/css/xterm.css" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <p class="eyebrow">Projects</p>
+          <div class="sidebar-header-actions">
+            <button id="add-project-btn" class="primary-button compact-button">添加项目</button>
+            <button id="toggle-sidebar-btn" class="icon-button">收起</button>
+          </div>
+        </div>
+
+        <label class="search-field">
+          <span>搜索项目</span>
+          <input id="project-search-input" type="search" placeholder="按项目名称过滤" />
+        </label>
+
+        <div id="project-list" class="project-list"></div>
+      </aside>
+      <div id="sidebar-resizer" class="sidebar-resizer"></div>
+
+      <main class="main-panel">
+        <div id="environment-banner" class="environment-banner hidden"></div>
+
+        <section class="workspace-body">
+          <section id="terminal-view" class="card terminal-card">
+            <div id="terminal-host" class="terminal-host"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+    <button id="sidebar-expand-btn" class="sidebar-expand-btn" type="button" aria-label="展开项目列表">展开</button>
+
+    <script src="../../node_modules/xterm/lib/xterm.js"></script>
+    <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+    <script src="./renderer.js"></script>
+  </body>
+  </html>
