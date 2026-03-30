@@ -1,6 +1,7 @@
 const os = require("node:os");
 const fs = require("node:fs");
 const pty = require("node-pty");
+const { spawnSync } = require("node:child_process");
 
 function debugLog(message, meta = {}) {
   try {
@@ -10,27 +11,36 @@ function debugLog(message, meta = {}) {
 }
 
 class TerminalService {
-  constructor(sendToRenderer, notificationService) {
+  constructor(sendToRenderer, notificationService, options = {}) {
     this.sendToRenderer = sendToRenderer;
     this.notificationService = notificationService;
+    this.getSettings = options.getSettings || (() => ({ proxy: { enabled: false, url: "" } }));
     this.sessions = new Map();
   }
 
-  createSession(sessionId, cwd, projectName) {
+  createSession(sessionId, cwd, projectName, options = {}) {
     const existing = this.sessions.get(sessionId);
     if (existing) {
       existing.cwd = cwd;
       existing.projectName = projectName;
+      existing.projectId = options.projectId || existing.projectId;
       return {
         sessionId,
         shell: existing.shell,
+        mode: existing.mode,
         cwd,
         home: os.homedir(),
       };
     }
 
+    const proxyEnv = this.buildProxyEnv();
+    const launchCodex = options.launchCodex !== false && this.hasCodexCommand();
     const shell = process.env.SHELL || "/usr/bin/zsh";
-    const ptyProcess = pty.spawn(shell, ["-l"], {
+    const executable = launchCodex ? "codex" : shell;
+    const args = launchCodex ? [] : ["-l"];
+    const mode = launchCodex ? "codex" : "shell";
+
+    const ptyProcess = pty.spawn(executable, args, {
       name: "xterm-256color",
       cols: 120,
       rows: 36,
@@ -38,22 +48,26 @@ class TerminalService {
       env: {
         ...process.env,
         TERM: "xterm-256color",
+        ...proxyEnv,
       },
     });
 
     const session = {
       sessionId,
       shell,
+      mode,
       cwd,
       projectName,
+      projectId: options.projectId || null,
       ptyProcess,
       codex: {
-        active: false,
-        booting: false,
+        active: launchCodex,
+        booting: launchCodex,
         pendingPrompt: false,
         sawOutputSinceSubmit: false,
         inputBuffer: "",
         recentText: "",
+        completionTimer: null,
       },
     };
 
@@ -63,6 +77,7 @@ class TerminalService {
       this.sendToRenderer("terminal:data", { sessionId, data });
     });
     ptyProcess.onExit(({ exitCode, signal }) => {
+      this.clearCompletionTimer(session);
       this.sendToRenderer("terminal:exit", { sessionId, exitCode, signal });
       this.sessions.delete(sessionId);
     });
@@ -70,6 +85,7 @@ class TerminalService {
     return {
       sessionId,
       shell,
+      mode,
       cwd,
       home: os.homedir(),
     };
@@ -114,6 +130,7 @@ class TerminalService {
       return false;
     }
 
+    this.clearCompletionTimer(session);
     session.ptyProcess.kill();
     this.sessions.delete(sessionId);
     return true;
@@ -133,6 +150,7 @@ class TerminalService {
     const text = String(data || "");
     for (const char of text) {
       if (char === "\u0003") {
+        this.clearCompletionTimer(session);
         session.codex.pendingPrompt = false;
         session.codex.sawOutputSinceSubmit = false;
         session.codex.inputBuffer = "";
@@ -148,6 +166,11 @@ class TerminalService {
         if (!session.codex.booting && session.codex.inputBuffer.trim()) {
           session.codex.pendingPrompt = true;
           session.codex.sawOutputSinceSubmit = false;
+          this.clearCompletionTimer(session);
+          debugLog("codex:prompt:submitted", {
+            projectName: session.projectName,
+            prompt: session.codex.inputBuffer.trim().slice(0, 120),
+          });
         }
         session.codex.inputBuffer = "";
         continue;
@@ -169,11 +192,21 @@ class TerminalService {
 
     if (session.codex.pendingPrompt && text.trim()) {
       session.codex.sawOutputSinceSubmit = true;
+      this.scheduleCompletionCheck(session);
     }
 
-    if (!this.looksLikeCodexIdle(session.codex.recentText)) {
+    const idleMatch = this.looksLikeCodexIdle(session.codex.recentText);
+    if (!idleMatch) {
       return;
     }
+
+    debugLog("codex:idle:detected", {
+      projectName: session.projectName,
+      booting: session.codex.booting,
+      pendingPrompt: session.codex.pendingPrompt,
+      sawOutputSinceSubmit: session.codex.sawOutputSinceSubmit,
+      match: idleMatch,
+    });
 
     if (session.codex.booting) {
       debugLog("codex:idle:boot-finished", { projectName: session.projectName });
@@ -183,7 +216,11 @@ class TerminalService {
 
     if (session.codex.pendingPrompt && session.codex.sawOutputSinceSubmit) {
       debugLog("codex:idle:notify", { projectName: session.projectName });
-      this.notificationService?.notifyTerminalTurnFinished(session.projectName || "当前项目");
+      this.notificationService?.notifyTerminalTurnFinished(
+        session.projectName || "当前项目",
+        session.projectId || null
+      );
+      this.clearCompletionTimer(session);
       session.codex.pendingPrompt = false;
       session.codex.sawOutputSinceSubmit = false;
     }
@@ -191,7 +228,21 @@ class TerminalService {
 
   looksLikeCodexIdle(text) {
     const tail = String(text || "").slice(-1200);
-    return /(?:^|\n)\s*›\s.*$/m.test(tail) && /gpt-[^\n]*\d+% left/.test(tail);
+    const hasPromptLine =
+      /(?:^|\n)\s*[›❯>]\s.*$/m.test(tail) ||
+      /(?:^|\n)\s*[›❯>]\s*$/m.test(tail);
+    const hasStatusLine =
+      /gpt-[^\n]*\d+% left/i.test(tail) ||
+      /(?:^|\n)\s*model:[^\n]*$/im.test(tail);
+
+    if (!hasPromptLine || !hasStatusLine) {
+      return false;
+    }
+
+    return {
+      hasPromptLine,
+      hasStatusLine,
+    };
   }
 
   stripAnsi(value) {
@@ -200,6 +251,57 @@ class TerminalService {
       /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007]*(?:\u0007|\u001b\\)|\u001b[@-_]/g,
       ""
     );
+  }
+
+  buildProxyEnv() {
+    const settings = this.getSettings();
+    const proxyUrl = String(settings?.proxy?.url || "").trim();
+
+    if (!settings?.proxy?.enabled || !proxyUrl) {
+      return {};
+    }
+
+    return {
+      HTTP_PROXY: proxyUrl,
+      HTTPS_PROXY: proxyUrl,
+      ALL_PROXY: proxyUrl,
+      http_proxy: proxyUrl,
+      https_proxy: proxyUrl,
+      all_proxy: proxyUrl,
+    };
+  }
+
+  hasCodexCommand() {
+    const result = spawnSync("bash", ["-lc", "command -v codex >/dev/null 2>&1"], {
+      stdio: "ignore",
+    });
+    return result.status === 0;
+  }
+
+  scheduleCompletionCheck(session) {
+    this.clearCompletionTimer(session);
+    session.codex.completionTimer = setTimeout(() => {
+      session.codex.completionTimer = null;
+      if (!session.codex.pendingPrompt || !session.codex.sawOutputSinceSubmit) {
+        return;
+      }
+
+      debugLog("codex:idle:timer-notify", { projectName: session.projectName });
+      this.notificationService?.notifyTerminalTurnFinished(
+        session.projectName || "当前项目",
+        session.projectId || null
+      );
+      session.codex.pendingPrompt = false;
+      session.codex.sawOutputSinceSubmit = false;
+    }, 3500);
+  }
+
+  clearCompletionTimer(session) {
+    if (!session?.codex?.completionTimer) {
+      return;
+    }
+    clearTimeout(session.codex.completionTimer);
+    session.codex.completionTimer = null;
   }
 }
 

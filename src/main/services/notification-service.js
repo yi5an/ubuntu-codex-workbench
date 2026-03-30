@@ -1,6 +1,4 @@
 const fs = require("node:fs");
-const { execFile } = require("node:child_process");
-const { Notification } = require("electron");
 
 function debugLog(message, meta = {}) {
   try {
@@ -12,6 +10,7 @@ function debugLog(message, meta = {}) {
 class NotificationService {
   constructor(focusWindow) {
     this.focusWindow = focusWindow;
+    this.onNotify = null;
   }
 
   notifyTaskFinished(task, projectName) {
@@ -19,38 +18,31 @@ class NotificationService {
     this.showNotification({
       title: isSuccess ? "Codex 任务已完成" : "Codex 任务失败",
       body: `${projectName} · ${task.status}`,
+      projectName,
     });
   }
 
-  notifyTerminalTurnFinished(projectName) {
+  notifyTerminalTurnFinished(projectName, projectId) {
     this.showNotification({
       title: "Codex 已完成当前轮次",
       body: `${projectName} · 可以继续输入下一条指令`,
+      projectName,
+      projectId,
     });
   }
 
-  showNotification({ title, body }) {
-    debugLog("notify:request", { title, body, platform: process.platform });
+  showNotification({ title, body, projectName = null, projectId = null }) {
+    debugLog("notify:request", { title, body, projectName, projectId, platform: process.platform });
 
-    if (process.platform === "linux") {
-      execFile("notify-send", [title, body], (error) => {
-        if (error) {
-          debugLog("notify:notify-send:error", { message: error.message });
-        } else {
-          debugLog("notify:notify-send:ok", { title });
-        }
+    if (typeof this.onNotify === "function") {
+      this.onNotify({
+        title,
+        body,
+        projectName,
+        projectId,
+        timestamp: Date.now(),
       });
     }
-
-    if (!Notification.isSupported()) {
-      debugLog("notify:electron:unsupported", { title });
-      return;
-    }
-
-    const notification = new Notification({ title, body });
-    notification.on("click", () => this.focusWindow());
-    notification.show();
-    debugLog("notify:electron:show", { title });
   }
 }
 

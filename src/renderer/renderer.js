@@ -3,23 +3,25 @@ const state = {
   selectedProjectId: null,
   searchQuery: "",
   environment: null,
-  sidebarCollapsed: false,
+  settings: null,
   projectViews: {},
+  projectAlerts: {},
   renderedSessionId: null,
 };
 
 const refs = {
   appShell: document.querySelector(".app-shell"),
   addProjectBtn: document.querySelector("#add-project-btn"),
-  toggleSidebarBtn: document.querySelector("#toggle-sidebar-btn"),
-  sidebarExpandBtn: document.querySelector("#sidebar-expand-btn"),
   sidebarResizer: document.querySelector("#sidebar-resizer"),
   projectSearchInput: document.querySelector("#project-search-input"),
   projectList: document.querySelector("#project-list"),
   environmentBanner: document.querySelector("#environment-banner"),
   terminalHost: document.querySelector("#terminal-host"),
   terminalView: document.querySelector("#terminal-view"),
+  toastContainer: document.querySelector("#toast-container"),
 };
+
+let toastTimer = null;
 
 const terminal = new window.Terminal({
   cursorBlink: true,
@@ -122,11 +124,17 @@ function ensureProjectView(projectId) {
       terminalConnected: false,
       terminalLoaded: false,
       terminalBuffer: "",
-      codexBooted: false,
     };
   }
 
   return state.projectViews[projectId];
+}
+
+function clearProjectAlert(projectId) {
+  if (!projectId) {
+    return;
+  }
+  state.projectAlerts[projectId] = false;
 }
 
 function currentProjectView() {
@@ -179,6 +187,7 @@ function renderProjects() {
   refs.projectList.innerHTML = projects
     .map((project) => {
       const isActive = project.id === state.selectedProjectId;
+      const hasAlert = Boolean(state.projectAlerts[project.id]);
       const lastOpened = project.lastOpened
         ? new Date(project.lastOpened).toLocaleString("zh-CN")
         : "尚未打开";
@@ -186,7 +195,10 @@ function renderProjects() {
       return `
         <article class="project-item ${isActive ? "active" : ""}" data-project-id="${project.id}">
           <div class="project-row">
-            <div><strong>${escapeHtml(project.name)}</strong></div>
+            <div class="project-title-wrap">
+              <strong>${escapeHtml(project.name)}</strong>
+              ${hasAlert ? '<span class="project-alert-dot" aria-label="有新消息"></span>' : ""}
+            </div>
             <div class="project-actions">
               <button class="icon-button" data-action="favorite" data-project-id="${project.id}">${project.favorite ? "★" : "☆"}</button>
               <button class="icon-button" data-action="remove" data-project-id="${project.id}">删除</button>
@@ -222,15 +234,26 @@ function renderTerminalBuffer() {
 }
 
 function renderWorkspace() {
-  const project = selectedProject();
-  const view = currentProjectView();
-
-  refs.appShell.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
-  refs.toggleSidebarBtn.textContent = state.sidebarCollapsed ? "展开" : "收起";
-  refs.sidebarExpandBtn.classList.toggle("visible", state.sidebarCollapsed);
-
   refs.terminalView.classList.remove("hidden");
   renderTerminalBuffer();
+}
+
+function showToast({ title, body }) {
+  refs.toastContainer.innerHTML = `
+    <div class="toast">
+      <div class="toast-title">${escapeHtml(title)}</div>
+      <div class="toast-body">${escapeHtml(body)}</div>
+    </div>
+  `;
+  refs.toastContainer.classList.add("visible");
+
+  if (toastTimer) {
+    window.clearTimeout(toastTimer);
+  }
+
+  toastTimer = window.setTimeout(() => {
+    refs.toastContainer.classList.remove("visible");
+  }, 12000);
 }
 
 function render() {
@@ -259,7 +282,6 @@ async function createOrAttachTerminal(projectId, force = false) {
     view.terminalLoaded = false;
     view.terminalConnected = false;
     view.terminalBuffer = "";
-    view.codexBooted = false;
   }
 
   await window.workbenchApi.createTerminal({
@@ -269,7 +291,6 @@ async function createOrAttachTerminal(projectId, force = false) {
   console.log("createOrAttachTerminal:created", { projectId, sessionId: view.terminalSessionId });
   view.terminalLoaded = true;
   view.terminalConnected = true;
-  view.codexBooted = false;
   view.terminalBuffer = "";
 
   if (state.selectedProjectId === projectId) {
@@ -279,26 +300,7 @@ async function createOrAttachTerminal(projectId, force = false) {
       rows: lastGoodTerminalSize.rows,
     });
   }
-
-  await bootCodex(projectId, false);
   renderWorkspace();
-}
-
-async function bootCodex(projectId, force) {
-  const view = ensureProjectView(projectId);
-  if (!view.terminalLoaded || !view.terminalConnected || !state.environment?.codex?.installed) {
-    return;
-  }
-
-  if (!force && view.codexBooted) {
-    return;
-  }
-
-  view.codexBooted = true;
-  await window.workbenchApi.runTerminalCommand({
-    sessionId: view.terminalSessionId,
-    command: "codex",
-  });
 }
 
 async function ensureProjectLoaded(projectId) {
@@ -324,19 +326,10 @@ async function refreshState() {
   const nextState = await window.workbenchApi.getState();
   state.projects = nextState.projects;
   state.environment = nextState.environment;
+  state.settings = nextState.settings;
   render();
   if (state.selectedProjectId) {
     await ensureProjectLoaded(state.selectedProjectId);
-    window.setTimeout(async () => {
-      const activeView = currentProjectView();
-      if (!state.selectedProjectId || !activeView) {
-        return;
-      }
-
-      if (!activeView.terminalLoaded || !activeView.terminalBuffer) {
-        await createOrAttachTerminal(state.selectedProjectId, true);
-      }
-    }, 1200);
   }
 }
 
@@ -353,18 +346,6 @@ terminal.onData((data) => {
 });
 
 window.addEventListener("resize", refreshTerminalSize);
-
-refs.toggleSidebarBtn.addEventListener("click", () => {
-  state.sidebarCollapsed = !state.sidebarCollapsed;
-  renderWorkspace();
-  refreshTerminalSize();
-});
-
-refs.sidebarExpandBtn.addEventListener("click", () => {
-  state.sidebarCollapsed = false;
-  renderWorkspace();
-  refreshTerminalSize();
-});
 
 refs.sidebarResizer.addEventListener("mousedown", (event) => {
   event.preventDefault();
@@ -429,6 +410,7 @@ refs.projectList.addEventListener("click", async (event) => {
   }
 
   state.selectedProjectId = targetProjectId;
+  clearProjectAlert(targetProjectId);
   render();
   await ensureProjectLoaded(targetProjectId);
 });
@@ -472,7 +454,6 @@ window.workbenchApi.onTerminalExit((payload) => {
 
   const view = ensureProjectView(projectId);
   view.terminalConnected = false;
-  view.codexBooted = false;
   if (state.selectedProjectId === projectId) {
     renderWorkspace();
   }
@@ -481,6 +462,7 @@ window.workbenchApi.onTerminalExit((payload) => {
 window.workbenchApi.onStateUpdated((nextState) => {
   state.projects = nextState.projects;
   state.environment = nextState.environment;
+  state.settings = nextState.settings;
   render();
   if (state.selectedProjectId) {
     const activeView = currentProjectView();
@@ -488,6 +470,15 @@ window.workbenchApi.onStateUpdated((nextState) => {
       ensureProjectLoaded(state.selectedProjectId);
     }
   }
+});
+
+window.workbenchApi.onNotificationShow((payload) => {
+  console.log(`notification:show ${JSON.stringify(payload)}`);
+  if (payload.projectId && payload.projectId !== state.selectedProjectId) {
+    state.projectAlerts[payload.projectId] = true;
+    renderProjects();
+  }
+  showToast(payload);
 });
 
 refreshState().then(() => {

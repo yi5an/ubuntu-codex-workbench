@@ -12,7 +12,7 @@ class ProjectStore {
     fs.mkdirSync(path.dirname(this.dataFile), { recursive: true });
 
     if (!fs.existsSync(this.dataFile)) {
-      const initial = { projects: [], tasks: [] };
+      const initial = { projects: [], tasks: [], settings: this.defaultSettings() };
       fs.writeFileSync(this.dataFile, JSON.stringify(initial, null, 2));
       return initial;
     }
@@ -23,9 +23,10 @@ class ProjectStore {
       return {
         projects: Array.isArray(parsed.projects) ? parsed.projects : [],
         tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+        settings: this.normalizeSettings(parsed.settings),
       };
     } catch {
-      return { projects: [], tasks: [] };
+      return { projects: [], tasks: [], settings: this.defaultSettings() };
     }
   }
 
@@ -47,6 +48,28 @@ class ProjectStore {
 
       return a.name.localeCompare(b.name);
     });
+  }
+
+  getSettings() {
+    return {
+      ...this.data.settings,
+      proxy: { ...this.data.settings.proxy },
+    };
+  }
+
+  updateSettings(patch = {}) {
+    const nextSettings = {
+      ...this.data.settings,
+      ...patch,
+      proxy: {
+        ...this.data.settings.proxy,
+        ...(patch.proxy || {}),
+      },
+    };
+
+    this.data.settings = this.normalizeSettings(nextSettings);
+    this.save();
+    return this.getSettings();
   }
 
   getTasks(limit = 20) {
@@ -132,7 +155,27 @@ class ProjectStore {
       return null;
     }
   }
+
+  defaultSettings() {
+    return {
+      proxy: {
+        enabled: false,
+        url: "",
+      },
+    };
+  }
+
+  normalizeSettings(settings) {
+    const defaults = this.defaultSettings();
+    return {
+      ...defaults,
+      ...(settings || {}),
+      proxy: {
+        ...defaults.proxy,
+        ...((settings && settings.proxy) || {}),
+      },
+    };
+  }
 }
 
 module.exports = { ProjectStore };
-

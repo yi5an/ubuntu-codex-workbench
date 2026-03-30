@@ -8,6 +8,7 @@ const { NotificationService } = require("./services/notification-service");
 const { TaskManager } = require("./services/task-manager");
 const { EnvironmentService } = require("./services/environment-service");
 const { TerminalService } = require("./services/terminal-service");
+const { CodexNotifyService } = require("./services/codex-notify-service");
 
 let mainWindow;
 let projectStore;
@@ -15,6 +16,7 @@ let taskManager;
 let vscodeService;
 let environmentService;
 let terminalService;
+let codexNotifyService;
 
 function debugLog(message, meta = {}) {
   try {
@@ -37,6 +39,13 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  mainWindow.on("focus", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+    mainWindow.flashFrame(false);
   });
 
   mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
@@ -131,6 +140,7 @@ function getState() {
     tasks: projectStore.getTasks(),
     currentTask: taskManager.getCurrentTask(),
     environment: environmentService.inspect(),
+    settings: projectStore.getSettings(),
   };
 }
 
@@ -187,6 +197,12 @@ function registerIpc() {
     return true;
   });
 
+  ipcMain.handle("settings:update", async (_event, patch) => {
+    const settings = projectStore.updateSettings(patch);
+    broadcastState();
+    return settings;
+  });
+
   ipcMain.handle("project:open", async (_event, projectId) => {
     const project = projectStore.markOpened(projectId);
     await vscodeService.openProject(project);
@@ -217,7 +233,10 @@ function registerIpc() {
     const { sessionId, projectId } = payload;
     const project = projectStore.markOpened(projectId);
     debugLog("terminal:create", { sessionId, projectId, path: project.path });
-    const terminal = terminalService.createSession(sessionId, project.path, project.name);
+    const terminal = terminalService.createSession(sessionId, project.path, project.name, {
+      projectId,
+      launchCodex: environmentService.inspect().codex?.installed,
+    });
     broadcastState();
     return terminal;
   });
@@ -249,7 +268,34 @@ app.whenReady().then(() => {
   vscodeService = new VSCodeService();
   environmentService = new EnvironmentService();
   const notificationService = new NotificationService(focusMainWindow);
-  terminalService = new TerminalService(sendRendererEvent, notificationService);
+  notificationService.onNotify = (payload) => {
+    sendRendererEvent("notification:show", payload);
+  };
+  terminalService = new TerminalService(sendRendererEvent, notificationService, {
+    getSettings: () => projectStore.getSettings(),
+  });
+  codexNotifyService = new CodexNotifyService({
+    eventFile: "/tmp/ubuntu-workbench-codex-events.jsonl",
+    onEvent: (event) => {
+      if (event?.type !== "agent-turn-complete" || !event.cwd) {
+        return;
+      }
+
+      const project = projectStore.getProjects().find((item) => item.path === event.cwd);
+      if (!project) {
+        return;
+      }
+
+      sendRendererEvent("notification:show", {
+        title: "Codex 已完成当前轮次",
+        body: `${project.name} · 可以继续输入下一条指令`,
+        projectId: project.id,
+        projectName: project.name,
+        timestamp: Date.now(),
+      });
+    },
+  });
+  codexNotifyService.start();
   taskManager = new TaskManager(projectStore, new CodexRunner(), notificationService);
   taskManager.on("updated", broadcastState);
 
@@ -258,6 +304,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  codexNotifyService?.stop();
   if (terminalService) {
     terminalService.disposeAll();
   }

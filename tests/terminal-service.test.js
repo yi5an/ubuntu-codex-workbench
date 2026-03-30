@@ -62,3 +62,25 @@ test("TerminalService does not notify for empty enter presses", () => {
 
   assert.equal(notifications.length, 0);
 });
+
+test("TerminalService injects proxy environment variables when enabled", () => {
+  const service = new TerminalService(() => {}, null, {
+    getSettings() {
+      return {
+        proxy: {
+          enabled: true,
+          url: "http://127.0.0.1:7890",
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(service.buildProxyEnv(), {
+    HTTP_PROXY: "http://127.0.0.1:7890",
+    HTTPS_PROXY: "http://127.0.0.1:7890",
+    ALL_PROXY: "http://127.0.0.1:7890",
+    http_proxy: "http://127.0.0.1:7890",
+    https_proxy: "http://127.0.0.1:7890",
+    all_proxy: "http://127.0.0.1:7890",
+  });
+});
